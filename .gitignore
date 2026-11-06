@@ -1,2 +1,32 @@
-# Ignore data folder
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime state produced by running a local cluster
 data/
+logs/
+pids/
+*.log
+
+# Scratch benchmark output (curated results live in experiments/)
+/bench_out/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
