@@ -71,9 +71,13 @@ def _worker_process(spec: dict, worker_ids: list[int], start_at: float, queue) -
 
     from dynamo.proto import dynamo_pb2 as pb
     from dynamo.proto import dynamo_pb2_grpc
+    from dynamo.rpc import CHANNEL_OPTIONS
 
     nodes = spec["nodes"]
-    channels = [grpc.insecure_channel(a) for a in nodes]
+    # Same channel options as DynamoClient: in particular a short minimum
+    # reconnect backoff, which also bounds how long a connection attempt to
+    # a dead node can hang (gRPC's default is 20 s).
+    channels = [grpc.insecure_channel(a, options=CHANNEL_OPTIONS) for a in nodes]
     stubs = [dynamo_pb2_grpc.DynamoServiceStub(c) for c in channels]
     records: list[tuple] = []
     lock = threading.Lock()
@@ -122,7 +126,7 @@ def _worker_process(spec: dict, worker_ids: list[int], start_at: float, queue) -
                 retried = attempt + 1
             latency_ms = (time.time() - now) * 1000.0
             local.append((round(now - start_at, 4), round(latency_ms, 3),
-                          "put" if is_put else "get", status, retried))
+                          "put" if is_put else "get", status, retried, node))
         with lock:
             records.extend(local)
 
@@ -166,7 +170,7 @@ def preload(nodes: list[str], keyspace: int, value_size: int) -> None:
 
 
 def run(spec: LoadSpec) -> list[tuple]:
-    """Run the load and return raw records ``(t, latency_ms, op, status, retried)``."""
+    """Run the load; records are ``(t, latency_ms, op, status, retried, coordinator_index)``."""
     procs = spec.processes or min(spec.clients, os.cpu_count() or 1)
     groups = [list(range(i, spec.clients, procs)) for i in range(procs)]
     ctx = mp.get_context("spawn")          # never fork a process that holds gRPC state
@@ -260,7 +264,7 @@ def write_results(out: Path, records: list[tuple], spec: LoadSpec, extra: dict |
         writer.writerows(rows)
     with gzip.open(out / "requests.csv.gz", "wt", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["t_s", "latency_ms", "op", "status", "retried"])
+        writer.writerow(["t_s", "latency_ms", "op", "status", "retried", "coordinator"])
         writer.writerows(records)
     return summary
 
