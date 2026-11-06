@@ -23,6 +23,106 @@ including a self-deadlock (re-acquiring a non-reentrant lock) that let a
 single node crash freeze the whole cluster. All are documented in [**docs/BUG_AUDIT.md**](docs/BUG_AUDIT.md).
 The system was rewritten with a test suite and reproducible experiments.
 
+## Architecture
+
+### Cluster
+
+Every node runs the same code. There is no leader and no central metadata
+service: membership spreads by gossip, and data placement is computed
+locally from the hash ring.
+
+```mermaid
+flowchart LR
+    C1([Client]) -- "Put / Get" --> N1
+    C2([Client]) -- "Put / Get" --> N3
+
+    subgraph ring["Consistent-hash ring (64 virtual nodes per node)"]
+        direction LR
+        N1["node-1"] --- N2["node-2"] --- N3["node-3"] --- N4["node-4"] --- N1
+    end
+
+    N1 -. "replicate to N=3" .-> N2
+    N1 -. "replicate to N=3" .-> N3
+    N2 -. "gossip, every 1 s" .- N4
+```
+
+- **Any node can coordinate any request.** The coordinator finds the key's
+  N replicas on the ring, sends the operation to all of them in parallel,
+  and answers once **W** writes or **R** reads have succeeded (default
+  N=3, R=2, W=2, so read and write quorums always overlap).
+- **Nodes discover each other by gossip.** Each second a node exchanges its
+  membership table with one random peer; heartbeats in that table drive
+  failure detection.
+
+### Inside a node
+
+```mermaid
+flowchart TB
+    rpc["gRPC server<br/>Put · Get · ForwardPut · ForwardGet · PutHint · DeliverHints · Gossip"]
+    coord["Coordinator<br/>replica plan · parallel fan-out · quorum wait · reconciliation"]
+    ring["HashRing<br/>preference lists"]
+    member["Membership<br/>gossip · heartbeats · failure detector"]
+    store[("Storage<br/>one file per key")]
+    hints[("HintStore<br/>writes held for dead replicas")]
+    bg["Background loops<br/>gossip · hint delivery · read repair"]
+    pool["Channel pool<br/>connections to peers"]
+
+    rpc --> coord
+    rpc --> store
+    coord --> ring
+    coord --> member
+    coord --> pool
+    coord --> store
+    coord --> hints
+    bg --> member
+    bg --> hints
+    bg --> pool
+```
+
+### Write and read path
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant K as Coordinator
+    participant A as Replica A
+    participant B as Replica B
+    participant D as Node D (stand-in)
+    C->>K: Put(key, value, context)
+    Note over K: replica B is dead, so node D stands in
+    par parallel fan-out
+        K->>A: ForwardPut
+        K->>D: PutHint(intended for B)
+    end
+    A-->>K: ack
+    D-->>K: ack
+    K-->>C: OK (W = 2 reached)
+    Note over D,B: when B recovers, D delivers the hint (hinted handoff)
+```
+
+- **Writes** get a fresh version identifier (a *dot*) from the coordinator.
+  If a replica is down, the next healthy node on the ring keeps the write as
+  a *hint* and hands it back when the replica recovers (sloppy quorum).
+- **Reads** collect versions from R replicas and drop every version that
+  another one supersedes. Versions written concurrently are all returned as
+  *siblings*; the client merges them and writes back with the merged
+  context. Stale replicas are fixed in the background (read repair).
+
+### Key design decisions
+
+| Decision | Why |
+|---|---|
+| Dotted version vectors instead of plain vector clocks | Plain clocks either collide or silently drop a write when one node coordinates two concurrent updates ([details](docs/DESIGN.md#versioning-dotted-version-vectors)) |
+| Sloppy quorum with hinted handoff | Stays writable while replicas are down; measured 100 % availability with a node killed ([E3](experiments/README.md#e3-quorum-trade-offs), [E4](experiments/README.md#e4-crash-and-recovery)) |
+| Failure detection on heartbeat progress, measured on the local clock | Immune to clock skew between machines; suspects are probed before being declared dead |
+| 64 virtual nodes per node | Busiest node within ~20 % of average load ([E5](experiments/README.md#e5-virtual-nodes-and-load-balance)) |
+| One atomically replaced file per key | Crash-safe and simple; obsolete versions are discarded on every write |
+| Optional fsync | Power-loss durability costs 26 % of write throughput ([E6](experiments/README.md#e6-cost-of-fsync)) |
+
+**Not implemented (by design):** Merkle-tree anti-entropy, deletes with
+tombstones, TLS. [docs/DESIGN.md](docs/DESIGN.md) covers the full design,
+the concurrency model and these limitations.
+
 ## Results
 
 Measured on one 4-core laptop, with every node a separate process and the
@@ -158,22 +258,6 @@ interactive shell:
 | `leave NODE_ID` | Decommission a node (restarting it rejoins) |
 
 Exit code 3 means the cluster could not reach a quorum.
-
-## How it works
-
-A client can send a request to **any** node; that node becomes the
-*coordinator*, finds the key's N replicas on the hash ring, sends the
-operation to them in parallel and answers as soon as R (reads) or W (writes)
-have responded. Replicas the failure detector considers dead are replaced
-by the next healthy nodes on the ring, which keep the write as a *hint* and
-deliver it when the replica comes back. Reads reconcile versions with
-dotted version vectors and return concurrent versions as siblings; stale
-replicas are repaired in the background.
-
-[**docs/DESIGN.md**](docs/DESIGN.md) has the full design with sequence
-diagrams, including why plain vector clocks were replaced by dotted version
-vectors, and the limitations (no Merkle-tree anti-entropy, no deletes, no
-TLS).
 
 ## Testing
 
