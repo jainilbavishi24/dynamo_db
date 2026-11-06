@@ -30,6 +30,9 @@ FAST = {
 }
 
 
+_HANDED_OUT: set[int] = set()
+
+
 def free_port() -> int:
     """A currently unused port *below* the kernel's ephemeral range.
 
@@ -38,11 +41,16 @@ def free_port() -> int:
     """
     for _ in range(200):
         port = random.randint(20000, 32000)
+        if port in _HANDED_OUT:
+            # Two nodes drawing the same random port before either binds it
+            # was a ~1 % per suite run "birthday" collision.
+            continue
         with socket.socket() as s:
             try:
                 s.bind(("localhost", port))
             except OSError:
                 continue
+            _HANDED_OUT.add(port)
             return port
     raise RuntimeError("no free port found")
 
