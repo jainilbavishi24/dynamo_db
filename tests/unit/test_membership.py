@@ -176,3 +176,15 @@ def test_peers_split_by_liveness(clocks):
     m.mark_dead("c")
     assert [p.node_id for p in m.peers(alive=True)] == ["b"]
     assert [p.node_id for p in m.peers(alive=False)] == ["c"]
+
+
+def test_suspects_are_live_peers_with_stale_heartbeats(clocks):
+    mono, _ = clocks
+    m = make("a", clocks, fail=4.0)
+    m.merge([state("b", 1, 1), state("c", 1, 1)])
+    mono.advance(1.0)
+    m.merge([state("c", 1, 2)])          # c heartbeats, b goes quiet
+    mono.advance(1.5)
+    assert [p.node_id for p in m.suspects(2.0)] == ["b"]
+    m.mark_dead("b")
+    assert m.suspects(2.0) == [], "dead peers are probed separately, not as suspects"

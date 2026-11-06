@@ -462,9 +462,6 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
 
     def _gossip_once(self) -> None:
         self.membership.heartbeat()
-        if self.membership.check_failures():
-            self._sync_ring()
-
         alive = self.membership.peers(alive=True)
         dead = self.membership.peers(alive=False)
         targets: list[tuple[str | None, str]] = []
@@ -474,6 +471,13 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
         else:
             # Not (or no longer) connected to anyone: (re)join via the seeds.
             targets.extend((None, s) for s in self.config.seeds if s != self.config.address)
+        # Peers we have not heard from for half the failure timeout are
+        # contacted directly, so a slow gossip path does not get a live node
+        # declared dead (and a dead one is detected sooner).
+        chosen = {node_id for node_id, _ in targets}
+        for peer in self.membership.suspects(self.config.fail_timeout / 2)[:2]:
+            if peer.node_id not in chosen:
+                targets.append((peer.node_id, peer.address))
         if dead and random.random() < self.config.probe_dead_probability:
             # Occasionally probe a dead node so recovery is noticed even if
             # every node had marked every other node dead (e.g. a partition).
@@ -489,6 +493,12 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
                     self._rpc_failed(node_id, "gossip", err)
                 continue
             self._apply_membership(reply.members)
+
+        # Judge liveness only *after* this round's exchanges: if this loop
+        # was itself delayed (CPU starvation, GC), the suspects it just
+        # contacted get a chance to prove they are alive first.
+        if self.membership.check_failures():
+            self._sync_ring()
 
     def _gossip_loop(self) -> None:
         while not self._stop.is_set():

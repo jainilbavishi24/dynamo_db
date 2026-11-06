@@ -257,6 +257,23 @@ class Membership:
                 if m.node_id != self.node_id and not m.left and m.alive == alive
             ]
 
+    def suspects(self, after: float) -> list[Member]:
+        """Live peers whose heartbeat we have not seen advance for ``after`` s.
+
+        The gossip loop contacts these directly before the failure detector
+        gives up on them (as in SWIM's "suspect" state): a live peer answers
+        and refreshes its heartbeat, a dead one fails the RPC and is marked
+        dead immediately instead of at the timeout.
+        """
+        now = self._monotonic()
+        with self._lock:
+            return [
+                replace(m)
+                for m in self._members.values()
+                if m.node_id != self.node_id and m.alive and not m.left
+                and now - m.last_seen > after
+            ]
+
     def ring_members(self) -> dict[str, str]:
         """Nodes that should own tokens: not left, not dead for too long."""
         now = self._monotonic()
