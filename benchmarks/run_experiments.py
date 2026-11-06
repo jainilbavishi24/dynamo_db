@@ -21,6 +21,7 @@ import csv
 import json
 import platform
 import random
+import shutil
 import signal
 import statistics
 import subprocess
@@ -37,6 +38,7 @@ from benchmarks.cluster import ROOT, ProcessCluster, ensure_original_worktree
 from dynamo.proto import dynamo_pb2 as pb
 from dynamo.proto import dynamo_pb2_grpc
 from dynamo.ring import HashRing, hash_key
+from dynamo.storage import Storage
 from dynamo.versioning import reconcile, version_key
 
 OUT = ROOT / "experiments"
@@ -315,8 +317,27 @@ def e5() -> None:
 
 # ===================================================================== E6
 def e6() -> None:
-    """Write latency with and without fsync."""
+    """Write latency with and without fsync: end-to-end, and the storage layer alone."""
     out = OUT / "E6_fsync"
+    micro = []
+    for fsync in (False, True):
+        store_dir = WORK / f"e6_micro_{fsync}"
+        shutil.rmtree(store_dir, ignore_errors=True)
+        store = Storage(store_dir, fsync=fsync)
+        lat = []
+        for i in range(2000):
+            v = pb.ValueWithContext(value=b"x" * 100,
+                                    dot=pb.VectorClockItem(node_id="bench", counter=i + 1))
+            t0 = time.perf_counter()
+            store.put(f"key-{i % 500}", v)
+            lat.append((time.perf_counter() - t0) * 1000)
+        lat.sort()
+        micro.append({"fsync": fsync, "puts": len(lat),
+                      "p50_ms": round(lat[len(lat) // 2], 4),
+                      "p99_ms": round(lat[int(len(lat) * 0.99)], 4),
+                      "mean_ms": round(sum(lat) / len(lat), 4)})
+        log(f"E6 storage micro-benchmark: {micro[-1]}")
+    _write_csv(out / "storage_put.csv", micro)
     rows = []
     for fsync in (False, True):
         args = ["--fsync"] if fsync else []
@@ -346,10 +367,12 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     chosen = list(EXPERIMENTS) if "all" in a.which else a.which
     random.seed(42)
-    save_json(OUT / "environment.json", environment())
+    env = environment()
     for name in chosen:
         started = time.monotonic()
         EXPERIMENTS[name]()
+        for d in OUT.glob(f"{name.upper()}_*"):
+            save_json(d / "environment.json", {**env, "duration_s": round(time.monotonic() - started)})
         log(f"{name} done in {time.monotonic() - started:.0f}s")
     from benchmarks import plots
     plots.main()

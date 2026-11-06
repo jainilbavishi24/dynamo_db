@@ -2,7 +2,9 @@
 
 Each of ``clients`` workers issues one request at a time (closed loop) to a
 coordinator chosen round-robin across the cluster, like a client-side load
-balancer. Workers are spread over several processes so the generator itself
+balancer: a coordinator that fails is skipped by the whole process for
+``AVOID_SECONDS``, and a request rejected as unavailable is retried once on
+the next coordinator. Workers are spread over several processes so the generator itself
 is not limited by Python's GIL.
 
 Works against both this implementation and the original one: the wire
@@ -32,6 +34,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 OK, QUORUM_FAIL, UNAVAILABLE, TIMEOUT, ERROR = "ok", "quorum_fail", "unavailable", "timeout", "error"
+AVOID_SECONDS = 3.0      # how long a process avoids a coordinator that just failed
 
 
 @dataclass
@@ -75,6 +78,16 @@ def _worker_process(spec: dict, worker_ids: list[int], start_at: float, queue) -
     records: list[tuple] = []
     lock = threading.Lock()
     end_at = start_at + spec["duration"]
+    # Coordinators that recently failed are avoided by every thread of this
+    # process for a few seconds, like a client-side load balancer would.
+    avoid_until = [0.0] * len(nodes)
+
+    def pick(idx: int) -> int:
+        now = time.time()
+        for step in range(len(nodes)):
+            if avoid_until[(idx + step) % len(nodes)] <= now:
+                return idx + step
+        return idx
 
     def client(wid: int) -> None:
         rng = random.Random(spec["seed"] * 1000 + wid)
@@ -88,7 +101,9 @@ def _worker_process(spec: dict, worker_ids: list[int], start_at: float, queue) -
             is_put = rng.random() < spec["put_ratio"]
             status, retried = ERROR, 0
             for attempt in range(2):             # one failover retry, like DynamoClient
-                stub = stubs[idx % len(stubs)]
+                idx = pick(idx)
+                node = idx % len(stubs)
+                stub = stubs[node]
                 idx += 1
                 try:
                     if is_put:
@@ -100,6 +115,8 @@ def _worker_process(spec: dict, worker_ids: list[int], start_at: float, queue) -
                         status = QUORUM_FAIL if "quorum" in reply.message.lower() else OK
                 except Exception as exc:  # noqa: BLE001
                     status = _classify(exc)
+                if status in (UNAVAILABLE, TIMEOUT):
+                    avoid_until[node] = time.time() + AVOID_SECONDS
                 if status != UNAVAILABLE:
                     break
                 retried = attempt + 1

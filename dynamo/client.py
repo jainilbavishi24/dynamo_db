@@ -26,6 +26,7 @@ import logging
 import random
 import shlex
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TypeVar
@@ -41,6 +42,7 @@ T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 EXIT_OK, EXIT_NOT_FOUND, EXIT_USAGE, EXIT_UNAVAILABLE = 0, 1, 2, 3
+AVOID_SECONDS = 5.0   # recently failed nodes are tried last for this long
 
 
 class DynamoError(Exception):
@@ -93,6 +95,7 @@ class DynamoClient:
         self._channels: dict[str, tuple[grpc.Channel, dynamo_pb2_grpc.DynamoServiceStub]] = {}
         self._discover = discover
         self._discovered = False
+        self._failed_at: dict[str, float] = {}
 
     # ------------------------------------------------------------- plumbing
     def _stub(self, address: str) -> dynamo_pb2_grpc.DynamoServiceStub:
@@ -112,6 +115,9 @@ class DynamoClient:
                 pass
         candidates = list(self._known)
         random.shuffle(candidates)
+        # Nodes that failed recently are tried last rather than first.
+        now = time.monotonic()
+        candidates.sort(key=lambda a: self._failed_at.get(a, -1e9) > now - AVOID_SECONDS)
         last: grpc.RpcError | None = None
         for address in candidates:
             try:
@@ -122,6 +128,7 @@ class DynamoClient:
                     raise QuorumUnavailable(details) from err
                 if err.code() == grpc.StatusCode.INVALID_ARGUMENT:
                     raise DynamoError(details) from err
+                self._failed_at[address] = time.monotonic()
                 last = err
         raise NoReachableNode(f"no reachable node among {candidates}: {last}")
 
