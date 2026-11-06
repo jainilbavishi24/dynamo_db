@@ -19,9 +19,11 @@ htmlcov/
 
 # Runtime state produced by running a local cluster
 data/
-logs/
-pids/
+/logs/
+/pids/
 *.log
+# ...but keep the curated node-log excerpts that back the experiment write-ups
+!experiments/**/*.log
 
 # Scratch benchmark output (curated results live in experiments/)
 /bench_out/

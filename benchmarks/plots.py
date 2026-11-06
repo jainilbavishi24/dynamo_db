@@ -89,9 +89,8 @@ def plot_e1() -> None:
             b.annotate(f"{y:.1f}", (x, y), xytext=(0, 3), textcoords="offset points",
                        ha="center", fontsize=8, color=INK_2)
     b.set_xticks(range(len(pcts)), ["p50", "p90", "p99"])
-    b.set_yscale("log")
     b.yaxis.set_major_formatter(FuncFormatter(ms))
-    b.set_title("Request latency (log scale, lower is better)")
+    b.set_title("Request latency (lower is better)")
     b.legend(loc="upper left")
     b.grid(axis="x", visible=False)
     fig.suptitle("3 nodes, N=3 R=2 W=2, 16 closed-loop clients, 50% writes, 30 s",
@@ -119,6 +118,7 @@ def plot_e2() -> None:
         ax.set_xticks([1, 2, 4, 8, 16, 32, 64], ["1", "2", "4", "8", "16", "32", "64"])
         ax.set_xlabel("concurrent clients")
     a.set_title("Throughput (successful ops/s)")
+    a.set_ylim(bottom=0)
     a.legend(loc="upper left")
     b.set_yscale("log")
     b.yaxis.set_major_formatter(FuncFormatter(ms))
@@ -151,6 +151,7 @@ def plot_e3() -> None:
         b.annotate(f"{v:.1f}%", (bar.get_x() + bar.get_width() / 2, v), xytext=(0, 3),
                    textcoords="offset points", ha="center", fontsize=9)
     b.set_ylim(0, 110)
+    b.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}%" if v <= 100 else ""))
     b.set_title("One of 4 nodes killed: requests succeeding")
     for ax in (a, b):
         ax.grid(axis="x", visible=False)
@@ -203,8 +204,9 @@ def plot_e4() -> None:
             ax.set_xlabel("seconds since node-3 restarted")
             ax.set_title("Hinted writes still waiting for node-3")
             ax.set_ylim(bottom=0)
-            ax.annotate(f"all {total:,} keys handed back after {c['last_delivery_after_restart_s']:.2f} s",
-                        (c["last_delivery_after_restart_s"], 0), xytext=(8, 18),
+            last = c["last_delivery_after_restart_s"]
+            ax.annotate(f"all {total:,} hinted keys handed back\n{last:.2f} s after restart",
+                        (c["last_delivery_after_restart_s"], 0), xytext=(-8, 24), ha="right",
                         textcoords="offset points", fontsize=8, color=INK_2)
             save(fig, d / "convergence.png")
 
