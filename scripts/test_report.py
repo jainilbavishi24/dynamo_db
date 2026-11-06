@@ -69,7 +69,7 @@ def main() -> int:
     ]
     for path in sorted(per_file):
         c = per_file[path]
-        lines.append(f"| `tests/{path}.py` | {c['passed']} | {c['failure'] + c['error']} |")
+        lines.append(f"| `{path}.py` | {c['passed']} | {c['failure'] + c['error']} |")
     lines += ["", "## Slowest tests", "", "| Seconds | Test |", "|---:|---|"]
     for seconds, name in sorted(durations, reverse=True)[:10]:
         lines.append(f"| {seconds:.2f} | `{name}` |")
