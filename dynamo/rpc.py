@@ -44,6 +44,17 @@ class ChannelPool:
                 self._entries[address] = entry
             return entry[1]
 
+    def reset(self, address: str) -> None:
+        """Drop the cached channel so the next RPC reconnects immediately.
+
+        Used when a peer comes back: its old channel may still be waiting
+        out a reconnect backoff and would fail the first RPCs.
+        """
+        with self._lock:
+            entry = self._entries.pop(address, None)
+        if entry is not None:
+            entry[0].close()
+
     def close(self) -> None:
         with self._lock:
             self._closed = True

@@ -35,12 +35,21 @@ class NodeServer:
         self.grpc_server = grpc.server(
             futures.ThreadPoolExecutor(config.server_workers,
                                        thread_name_prefix=f"{config.node_id}-srv"),
-            options=CHANNEL_OPTIONS,
+            # gRPC enables SO_REUSEPORT by default, which lets a second process
+            # silently bind the same port and steal half the traffic.
+            options=(*CHANNEL_OPTIONS, ("grpc.so_reuseport", 0)),
         )
         dynamo_pb2_grpc.add_DynamoServiceServicer_to_server(self.node, self.grpc_server)
-        bound = self.grpc_server.add_insecure_port(f"{config.bind}:{config.port}")
+        endpoint = f"{config.bind}:{config.port}"
+        try:
+            bound = self.grpc_server.add_insecure_port(endpoint)
+        except RuntimeError as exc:
+            bound, cause = 0, exc
+        else:
+            cause = None
         if bound == 0:
-            raise OSError(f"could not bind {config.bind}:{config.port}")
+            self.node.stop()
+            raise OSError(f"could not bind {endpoint} (already in use?)") from cause
 
     def start(self) -> NodeServer:
         self.grpc_server.start()
@@ -116,7 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     if not config.strongly_consistent_quorums:
         log.warning("R + W <= N: reads may miss the latest acknowledged write")
 
-    server = NodeServer(config).start()
+    try:
+        server = NodeServer(config).start()
+    except OSError as exc:
+        log.error("%s", exc)
+        return 1
     stopped = threading.Event()
 
     def _shutdown(signum: int, _frame: object) -> None:

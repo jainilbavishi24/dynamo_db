@@ -235,6 +235,8 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
         if intended == self.node_id:
             self.storage.put(key, version)
             return
+        if not self.hints.count(intended):
+            self.log.info("holding hinted writes for unreachable replica %s", intended)
         self.hints.add(intended, key, version)
         self._count("hints_stored")
 
@@ -283,9 +285,9 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
                 continue
             have = {version_key(v) for v in versions}
             missing = [v for v in latest if version_key(v) not in have]
+            self._count("read_repairs")
             for version in missing:
                 self._write_one(Target(target.node_id, target.node_id), key, version)
-            self._count("read_repairs")
             self.log.debug("read repair: pushed %d version(s) of %r to %s",
                            len(missing), key, target.node_id)
 
@@ -390,10 +392,16 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
 
     def _apply_membership(self, states: Iterable[pb.NodeState]) -> None:
         events = self.membership.merge(states)
-        if events:
-            self._sync_ring()
-            if any(e in (Event.RECOVERED, Event.REJOINED) for e, _ in events):
-                self._wake_hints()
+        if not events:
+            return
+        self._sync_ring()
+        returned = [nid for e, nid in events if e in (Event.RECOVERED, Event.REJOINED)]
+        for node_id in returned:
+            address = self.membership.address_of(node_id)
+            if address:
+                self.pool.reset(address)
+        if returned:
+            self._wake_hints()
 
     def _sync_ring(self) -> None:
         """Make the ring match the membership table."""

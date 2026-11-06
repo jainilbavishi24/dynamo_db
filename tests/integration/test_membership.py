@@ -77,3 +77,12 @@ def test_partitioned_nodes_heal(cluster):
         for b in cluster.ids:
             cluster.node(a).membership.mark_dead(b)
     cluster.wait_converged()
+
+
+def test_second_process_cannot_bind_a_used_port(cluster):
+    # Regression: gRPC's default SO_REUSEPORT let a duplicate node bind the
+    # same port, after which both processes fought over the node id.
+    from dynamo.server import NodeServer
+
+    with pytest.raises(OSError):
+        NodeServer(cluster.config("node-1"))

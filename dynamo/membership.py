@@ -191,8 +191,13 @@ class Membership:
         """Handle what a peer believes about *us* (lock held)."""
         me = self._members[self.node_id]
         if state.generation > me.generation:
-            # A peer remembers a newer incarnation than ours (wall clock went
-            # backwards across a restart). Jump ahead so our state wins.
+            # A peer remembers a newer incarnation than ours: either the wall
+            # clock went backwards across a restart, or another live process
+            # is using our node id. Jump ahead so our state wins.
+            self.log.warning(
+                "membership: peers know a newer incarnation of %s (generation %d > %d); "
+                "is another process running with the same node id?",
+                self.node_id, state.generation, me.generation)
             me.generation = state.generation + 1
             me.version = self._wall_ms()
         elif state.generation == me.generation and not state.up and not me.left:

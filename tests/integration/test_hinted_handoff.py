@@ -25,7 +25,9 @@ def test_standin_holds_hint_and_hands_it_back(make_cluster):
 
     cluster.client("node-1").put(key, "written-while-down")
     # The 4th node on the ring (node-1, outside the top 3) is the stand-in.
-    assert cluster.node("node-1").hints.count("node-4") == 1
+    # Put returns after W acks, so the third (hinted) write may still be in flight.
+    wait_until(lambda: cluster.node("node-1").hints.count("node-4") == 1,
+               message="stand-in stored the hint")
     assert cluster.client("node-1").get(key).versions[0].text == "written-while-down"
 
     cluster.start("node-4")
@@ -42,7 +44,7 @@ def test_coordinator_keeps_hint_when_no_standin(cluster):
     db = cluster.client("node-1")
     for i in range(10):
         db.put(f"k{i}", f"v{i}")
-    assert cluster.node("node-1").hints.count("node-3") == 10
+    wait_until(lambda: cluster.node("node-1").hints.count("node-3") == 10)
 
     cluster.start("node-3")
     wait_until(lambda: all(cluster.values_on("node-3", f"k{i}") == [f"v{i}"] for i in range(10)),
@@ -56,7 +58,7 @@ def test_hint_detected_on_rpc_failure_before_failure_detector(make_cluster):
     cluster = make_cluster(3, gossip_interval=5.0, fail_timeout=30.0, probe_dead_probability=0.0)
     cluster.stop("node-3")
     cluster.client("node-1").put("k", "v")
-    assert cluster.node("node-1").hints.count("node-3") == 1
+    wait_until(lambda: cluster.node("node-1").hints.count("node-3") == 1)
 
 
 def test_hints_survive_standin_restart(make_cluster):
@@ -64,6 +66,7 @@ def test_hints_survive_standin_restart(make_cluster):
     cluster.stop("node-3")
     cluster.wait_dead("node-3")
     cluster.client("node-1").put("k", "durable-hint")
+    wait_until(lambda: cluster.node("node-1").hints.count("node-3") == 1)
     cluster.restart("node-1")
     assert cluster.node("node-1").hints.count("node-3") == 1
     cluster.start("node-3")
