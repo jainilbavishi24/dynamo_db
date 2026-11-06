@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import dynamo_pb2 as dynamo__pb2
+from dynamo.proto import dynamo_pb2 as dynamo_dot_proto_dot_dynamo__pb2
 
-GRPC_GENERATED_VERSION = '1.70.0'
+GRPC_GENERATED_VERSION = '1.85.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,15 +18,18 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in dynamo_pb2_grpc.py depends on'
+        + ' but the generated code in dynamo/proto/dynamo_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
     )
 
 
-class DynamoServiceStub(object):
-    """--- Main service: client → coordinator and coordinator → replica RPCs ---
+class DynamoServiceStub:
+    """---------------------------------------------------------------------------
+    Service
+    ---------------------------------------------------------------------------
+
     """
 
     def __init__(self, channel):
@@ -37,47 +40,51 @@ class DynamoServiceStub(object):
         """
         self.Put = channel.unary_unary(
                 '/dynamo.DynamoService/Put',
-                request_serializer=dynamo__pb2.PutRequest.SerializeToString,
-                response_deserializer=dynamo__pb2.PutReply.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.PutRequest.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.PutReply.FromString,
                 _registered_method=True)
         self.Get = channel.unary_unary(
                 '/dynamo.DynamoService/Get',
-                request_serializer=dynamo__pb2.GetRequest.SerializeToString,
-                response_deserializer=dynamo__pb2.GetReply.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.GetRequest.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.GetReply.FromString,
                 _registered_method=True)
         self.ForwardPut = channel.unary_unary(
                 '/dynamo.DynamoService/ForwardPut',
-                request_serializer=dynamo__pb2.PutRequest.SerializeToString,
-                response_deserializer=dynamo__pb2.PutReply.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.PutRequest.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.PutReply.FromString,
                 _registered_method=True)
         self.ForwardGet = channel.unary_unary(
                 '/dynamo.DynamoService/ForwardGet',
-                request_serializer=dynamo__pb2.GetRequest.SerializeToString,
-                response_deserializer=dynamo__pb2.GetReply.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.GetRequest.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.GetReply.FromString,
                 _registered_method=True)
         self.PutHint = channel.unary_unary(
                 '/dynamo.DynamoService/PutHint',
-                request_serializer=dynamo__pb2.Hint.SerializeToString,
-                response_deserializer=dynamo__pb2.PutReply.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.Hint.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.PutReply.FromString,
                 _registered_method=True)
         self.DeliverHints = channel.unary_unary(
                 '/dynamo.DynamoService/DeliverHints',
-                request_serializer=dynamo__pb2.DeliverHintsRequest.SerializeToString,
-                response_deserializer=dynamo__pb2.DeliverHintsReply.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.DeliverHintsRequest.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.DeliverHintsReply.FromString,
                 _registered_method=True)
         self.Gossip = channel.unary_unary(
                 '/dynamo.DynamoService/Gossip',
-                request_serializer=dynamo__pb2.MembershipList.SerializeToString,
-                response_deserializer=dynamo__pb2.MembershipList.FromString,
+                request_serializer=dynamo_dot_proto_dot_dynamo__pb2.MembershipList.SerializeToString,
+                response_deserializer=dynamo_dot_proto_dot_dynamo__pb2.MembershipList.FromString,
                 _registered_method=True)
 
 
-class DynamoServiceServicer(object):
-    """--- Main service: client → coordinator and coordinator → replica RPCs ---
+class DynamoServiceServicer:
+    """---------------------------------------------------------------------------
+    Service
+    ---------------------------------------------------------------------------
+
     """
 
     def Put(self, request, context):
-        """Client -> any node (that node becomes coordinator)
+        """Client -> any node. The receiving node acts as the coordinator. Quorum
+        failures are reported with gRPC status UNAVAILABLE.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -90,7 +97,7 @@ class DynamoServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def ForwardPut(self, request, context):
-        """Coordinator -> replica (internal forwarding)
+        """Coordinator -> replica.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -103,7 +110,8 @@ class DynamoServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def PutHint(self, request, context):
-        """For hinted handoff storage on other nodes and delivery
+        """Coordinator -> stand-in node (sloppy quorum), and stand-in -> recovered
+        replica (hinted handoff).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -116,7 +124,7 @@ class DynamoServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def Gossip(self, request, context):
-        """Gossip membership exchange
+        """Push-pull membership exchange.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -127,38 +135,38 @@ def add_DynamoServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Put': grpc.unary_unary_rpc_method_handler(
                     servicer.Put,
-                    request_deserializer=dynamo__pb2.PutRequest.FromString,
-                    response_serializer=dynamo__pb2.PutReply.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.PutRequest.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.PutReply.SerializeToString,
             ),
             'Get': grpc.unary_unary_rpc_method_handler(
                     servicer.Get,
-                    request_deserializer=dynamo__pb2.GetRequest.FromString,
-                    response_serializer=dynamo__pb2.GetReply.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.GetRequest.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.GetReply.SerializeToString,
             ),
             'ForwardPut': grpc.unary_unary_rpc_method_handler(
                     servicer.ForwardPut,
-                    request_deserializer=dynamo__pb2.PutRequest.FromString,
-                    response_serializer=dynamo__pb2.PutReply.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.PutRequest.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.PutReply.SerializeToString,
             ),
             'ForwardGet': grpc.unary_unary_rpc_method_handler(
                     servicer.ForwardGet,
-                    request_deserializer=dynamo__pb2.GetRequest.FromString,
-                    response_serializer=dynamo__pb2.GetReply.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.GetRequest.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.GetReply.SerializeToString,
             ),
             'PutHint': grpc.unary_unary_rpc_method_handler(
                     servicer.PutHint,
-                    request_deserializer=dynamo__pb2.Hint.FromString,
-                    response_serializer=dynamo__pb2.PutReply.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.Hint.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.PutReply.SerializeToString,
             ),
             'DeliverHints': grpc.unary_unary_rpc_method_handler(
                     servicer.DeliverHints,
-                    request_deserializer=dynamo__pb2.DeliverHintsRequest.FromString,
-                    response_serializer=dynamo__pb2.DeliverHintsReply.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.DeliverHintsRequest.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.DeliverHintsReply.SerializeToString,
             ),
             'Gossip': grpc.unary_unary_rpc_method_handler(
                     servicer.Gossip,
-                    request_deserializer=dynamo__pb2.MembershipList.FromString,
-                    response_serializer=dynamo__pb2.MembershipList.SerializeToString,
+                    request_deserializer=dynamo_dot_proto_dot_dynamo__pb2.MembershipList.FromString,
+                    response_serializer=dynamo_dot_proto_dot_dynamo__pb2.MembershipList.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -168,8 +176,11 @@ def add_DynamoServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class DynamoService(object):
-    """--- Main service: client → coordinator and coordinator → replica RPCs ---
+class DynamoService:
+    """---------------------------------------------------------------------------
+    Service
+    ---------------------------------------------------------------------------
+
     """
 
     @staticmethod
@@ -187,8 +198,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/Put',
-            dynamo__pb2.PutRequest.SerializeToString,
-            dynamo__pb2.PutReply.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.PutRequest.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.PutReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -214,8 +225,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/Get',
-            dynamo__pb2.GetRequest.SerializeToString,
-            dynamo__pb2.GetReply.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.GetRequest.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.GetReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -241,8 +252,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/ForwardPut',
-            dynamo__pb2.PutRequest.SerializeToString,
-            dynamo__pb2.PutReply.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.PutRequest.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.PutReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -268,8 +279,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/ForwardGet',
-            dynamo__pb2.GetRequest.SerializeToString,
-            dynamo__pb2.GetReply.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.GetRequest.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.GetReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -295,8 +306,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/PutHint',
-            dynamo__pb2.Hint.SerializeToString,
-            dynamo__pb2.PutReply.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.Hint.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.PutReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -322,8 +333,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/DeliverHints',
-            dynamo__pb2.DeliverHintsRequest.SerializeToString,
-            dynamo__pb2.DeliverHintsReply.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.DeliverHintsRequest.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.DeliverHintsReply.FromString,
             options,
             channel_credentials,
             insecure,
@@ -349,8 +360,8 @@ class DynamoService(object):
             request,
             target,
             '/dynamo.DynamoService/Gossip',
-            dynamo__pb2.MembershipList.SerializeToString,
-            dynamo__pb2.MembershipList.FromString,
+            dynamo_dot_proto_dot_dynamo__pb2.MembershipList.SerializeToString,
+            dynamo_dot_proto_dot_dynamo__pb2.MembershipList.FromString,
             options,
             channel_credentials,
             insecure,
