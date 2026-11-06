@@ -137,8 +137,13 @@ def plot_e3() -> None:
     healthy = [r for r in rows if r["phase"] == "healthy"]
     down = [r for r in rows if r["phase"] == "one_node_down"]
     fig, (a, b) = plt.subplots(1, 2, figsize=(10, 4))
-    a.bar(labels, [float(r["p50_ms"]) for r in healthy], color=BLUE, width=0.55)
+    width = 0.38
+    for k, (col, label, color) in enumerate((("get_p50_ms", "GET", BLUE), ("put_p50_ms", "PUT", AQUA))):
+        xs = [i + (k - 0.5) * width for i in range(len(labels))]
+        a.bar(xs, [float(r[col]) for r in healthy], width=width - 0.04, color=color, label=label)
+    a.set_xticks(range(len(labels)), labels)
     a.set_title("Healthy cluster: median latency")
+    a.legend(loc="upper left")
     a.yaxis.set_major_formatter(FuncFormatter(ms))
     avail = [100 * (1 - float(r["error_rate"])) for r in down]
     bars = b.bar(labels, avail, color=BLUE, width=0.55)
@@ -150,7 +155,7 @@ def plot_e3() -> None:
     for ax in (a, b):
         ax.grid(axis="x", visible=False)
         ax.tick_params(axis="x", labelsize=8)
-    fig.suptitle("4 nodes, N=3, 16 clients, 50% writes, 15 s per phase", x=0.01, ha="left",
+    fig.suptitle("4 nodes, N=3, 2 clients (below saturation), 50% writes, 15 s per phase", x=0.01, ha="left",
                  fontsize=9, color=INK_2)
     save(fig, d / "quorums.png")
 
@@ -246,23 +251,26 @@ def plot_e6() -> None:
     d = EXP / "E6_fsync"
     if not (d / "results.csv").exists():
         return
-    rows = read_csv(d / "results.csv")
-    pcts = ["p50_ms", "p90_ms", "p99_ms"]
-    fig, ax = plt.subplots(figsize=(7, 3.6))
-    width = 0.38
-    for k, (row, color) in enumerate(zip(rows, (BLUE, ORANGE), strict=False)):
-        label = "fsync on" if row["fsync"] == "True" else "fsync off"
-        xs = [i + (k - 0.5) * width for i in range(len(pcts))]
-        ys = [float(row[p]) for p in pcts]
-        ax.bar(xs, ys, width=width - 0.04, color=color, label=label)
-        for x, y in zip(xs, ys, strict=True):
-            ax.annotate(f"{y:.1f}", (x, y), xytext=(0, 3), textcoords="offset points",
-                        ha="center", fontsize=8, color=INK_2)
-    ax.set_xticks(range(len(pcts)), ["p50", "p90", "p99"])
-    ax.yaxis.set_major_formatter(FuncFormatter(ms))
-    ax.set_title("PUT latency, 8 clients, 100% writes")
-    ax.legend(loc="upper left")
-    ax.grid(axis="x", visible=False)
+    fig, (a, b) = plt.subplots(1, 2, figsize=(10, 3.8))
+    for ax, rows, title in (
+        (a, read_csv(d / "storage_put.csv"), "Storage.put alone (1 thread)"),
+        (b, read_csv(d / "results.csv"), "End-to-end PUT (3 nodes, 8 clients)"),
+    ):
+        pcts = ["p50_ms", "p99_ms"]
+        width = 0.38
+        for k, (row, color) in enumerate(zip(rows, (BLUE, AQUA), strict=False)):
+            label = "fsync on" if row["fsync"] == "True" else "fsync off"
+            xs = [i + (k - 0.5) * width for i in range(len(pcts))]
+            ys = [float(row[p]) for p in pcts]
+            ax.bar(xs, ys, width=width - 0.04, color=color, label=label)
+            for x, y in zip(xs, ys, strict=True):
+                ax.annotate(f"{y:.2f}" if y < 10 else f"{y:.0f}", (x, y), xytext=(0, 3),
+                            textcoords="offset points", ha="center", fontsize=8, color=INK_2)
+        ax.set_xticks(range(len(pcts)), ["p50", "p99"])
+        ax.yaxis.set_major_formatter(FuncFormatter(ms))
+        ax.set_title(title)
+        ax.legend(loc="upper left")
+        ax.grid(axis="x", visible=False)
     save(fig, d / "fsync.png")
 
 

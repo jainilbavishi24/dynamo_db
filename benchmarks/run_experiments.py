@@ -21,6 +21,7 @@ import csv
 import json
 import platform
 import random
+import re
 import shutil
 import signal
 import statistics
@@ -60,13 +61,20 @@ def cluster(impl: str, size: int, name: str, server_args: list[str] | None = Non
     return ProcessCluster(size, WORK / name, impl=impl, server_args=server_args, **kwargs).start_all()
 
 
+KEY_EVENTS = re.compile(r"DEAD|RECOVER|JOINED|LEFT|handoff|holding hinted|SKIP PUT|HINT STORED|"
+                        r"Delivered|WARN|ERROR|Traceback|Server started|serving on|stopped")
+
+
 def keep_logs(c: ProcessCluster, dest: Path) -> None:
-    """Copy node logs (truncated) next to the results for later inspection."""
+    """Copy node logs next to the results: the first and last 100 lines plus
+    every membership/handoff event in between (full logs can be huge)."""
     dest.mkdir(parents=True, exist_ok=True)
     for f in sorted(c.workdir.glob("node-*.log")):
         lines = f.read_text(errors="replace").splitlines()
-        if len(lines) > 400:
-            lines = lines[:200] + [f"... {len(lines) - 400} lines omitted ..."] + lines[-200:]
+        if len(lines) > 200:
+            middle = [ln for ln in lines[100:-100] if KEY_EVENTS.search(ln)]
+            lines = (lines[:100] + [f"... {len(lines) - 200} lines omitted except key events ..."]
+                     + middle + ["... end of key events ..."] + lines[-100:])
         (dest / f.name).write_text("\n".join(lines) + "\n")
 
 
@@ -138,7 +146,11 @@ def e2() -> None:
 
 # ===================================================================== E3
 def e3() -> None:
-    """Quorum trade-offs on 4 nodes (N=3), healthy and with one node killed."""
+    """Quorum trade-offs on 4 nodes (N=3), healthy and with one node killed.
+
+    2 clients keep the 4-core machine below saturation, so latency reflects
+    the cost of waiting for R/W replicas rather than CPU queueing.
+    """
     out = OUT / "E3_quorum_tradeoffs"
     configs = [(1, 1), (2, 2), (1, 3), (3, 1), (3, 3)]
     rows = []
@@ -152,7 +164,7 @@ def e3() -> None:
                     time.sleep(3)          # > fail-timeout: the failure is detected
                 nodes = c.addresses[:3] if phase == "one_node_down" else c.addresses
                 log(f"E3: R={r} W={w} {phase}")
-                spec = LoadSpec(nodes=nodes, clients=16, duration=15)
+                spec = LoadSpec(nodes=nodes, clients=2, duration=15)
                 s = summarize(run(spec), spec)
                 rows.append({"r": r, "w": w, "phase": phase, **_brief(s)})
     _write_csv(out / "results.csv", rows)
