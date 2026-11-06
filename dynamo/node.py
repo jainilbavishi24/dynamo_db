@@ -174,6 +174,30 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
             self.membership.mark_dead(node_id)
 
     # =============================================================== fan-out
+    def _fan_out(self, targets: Iterable[Target], fn: Callable[..., T], *args: Any) -> list[Future[T]]:
+        """Run ``fn(target, *args)`` for every target.
+
+        Remote calls are dispatched to the RPC pool first; work that stays on
+        this node (our own replica, or a hint we keep ourselves) then runs
+        inline, overlapping with the remote calls and avoiding a thread
+        hand-off.
+        """
+        futures: list[Future[T]] = []
+        local: list[Target] = []
+        for target in targets:
+            if target.node_id in (None, self.node_id):
+                local.append(target)
+            else:
+                futures.append(self._fanout.submit(fn, target, *args))
+        for target in local:
+            fut: Future[T] = Future()
+            try:
+                fut.set_result(fn(target, *args))
+            except Exception as exc:  # noqa: BLE001 - surfaced through the future
+                fut.set_exception(exc)
+            futures.append(fut)
+        return futures
+
     def _gather(
         self,
         futures: Iterable[Future[T]],
@@ -260,10 +284,27 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
         # A node serving as a stand-in also answers from the hints it holds.
         return reconcile([*self.storage.get(key), *self.hints.versions_for_key(key)])
 
-    def _quorum_read(self, key: str, needed: int):
+    def _quorum_read(
+        self, key: str, needed: int, *, minimal: bool = False
+    ) -> tuple[list[tuple[Target, list[pb.ValueWithContext]]], set[Future]]:
+        """Read ``key`` from its replicas until ``needed`` have answered.
+
+        Normally every replica is asked (late answers feed read repair).
+        ``minimal`` asks only ``needed`` replicas, preferring ourselves, and
+        falls back to the others only if some of those fail.
+        """
         plan = [t for t in self.replica_plan(key) if t.node_id is not None]
-        futures = [self._fanout.submit(self._read_one, t, key) for t in plan]
-        responses, pending = self._gather(futures, needed, lambda r: r is not None)
+        if not minimal:
+            futures = self._fan_out(plan, self._read_one, key)
+            return self._gather(futures, needed, lambda r: r is not None)
+        plan.sort(key=lambda t: t.node_id != self.node_id)
+        first, spare = plan[:needed], plan[needed:]
+        responses, pending = self._gather(self._fan_out(first, self._read_one, key),
+                                          needed, lambda r: r is not None)
+        if len(responses) < needed and spare:
+            more, pending = self._gather([*pending, *self._fan_out(spare, self._read_one, key)],
+                                         needed - len(responses), lambda r: r is not None)
+            responses += more
         return responses, pending
 
     def _read_repair(
@@ -316,7 +357,7 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
             # Blind write: order it after everything the replicas currently
             # hold so it supersedes those versions instead of becoming a
             # sibling of them.
-            responses, _ = self._quorum_read(key, self.config.r)
+            responses, _ = self._quorum_read(key, self.config.r, minimal=True)
             causal = merged_clock(v for _, versions in responses for v in versions)
 
         # A fresh, never-reused dot identifies this write event. It must be
@@ -329,8 +370,8 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
         )
 
         plan = self.replica_plan(key)
-        futures = [self._fanout.submit(self._write_one, t, key, version) for t in plan]
-        acks, _ = self._gather(futures, self.config.w, bool)
+        acks, _ = self._gather(self._fan_out(plan, self._write_one, key, version),
+                               self.config.w, bool)
         if len(acks) < self.config.w:
             self._count("write_quorum_failures")
             self._abort(context, grpc.StatusCode.UNAVAILABLE,
