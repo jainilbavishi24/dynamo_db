@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.integration.conftest import free_port
+
 pytestmark = pytest.mark.e2e
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,10 +21,6 @@ FAST = ["--gossip-interval", "0.2", "--fail-timeout", "1.5", "--hint-interval", 
         "--rpc-timeout", "0.5"]
 
 
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("localhost", 0))
-        return s.getsockname()[1]
 
 
 def wait_port(port: int, timeout: float = 10.0) -> None:

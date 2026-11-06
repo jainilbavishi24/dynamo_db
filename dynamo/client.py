@@ -22,6 +22,7 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import logging
 import random
 import shlex
 import sys
@@ -37,6 +38,7 @@ from dynamo.rpc import CHANNEL_OPTIONS
 from dynamo.versioning import full_clock, merged_clock
 
 T = TypeVar("T")
+log = logging.getLogger(__name__)
 
 EXIT_OK, EXIT_NOT_FOUND, EXIT_USAGE, EXIT_UNAVAILABLE = 0, 1, 2, 3
 
@@ -169,8 +171,12 @@ class DynamoClient:
             last_updated_time=target.last_updated_time + 1, up=False)])
         try:
             # The node itself is the authority on its own state.
-            self._stub(target.address).Gossip(notice, timeout=self.timeout)
-        except grpc.RpcError:
+            # wait_for_ready: if the connection is still being (re)established,
+            # wait for it instead of failing fast and taking the fallback.
+            self._stub(target.address).Gossip(notice, timeout=self.timeout, wait_for_ready=True)
+        except grpc.RpcError as err:
+            log.warning("leave: %s unreachable at %s (%s: %s); notifying the cluster instead",
+                        node_id, target.address, err.code(), err.details())
             # Unreachable: tell the rest of the cluster directly.
             self._call(lambda s: s.Gossip(notice, timeout=self.timeout))
 

@@ -395,12 +395,16 @@ class DynamoNode(dynamo_pb2_grpc.DynamoServiceServicer):
         if not events:
             return
         self._sync_ring()
-        returned = [nid for e, nid in events if e in (Event.RECOVERED, Event.REJOINED)]
-        for node_id in returned:
+        # We may have learned about this peer from *its* gossip while our own
+        # channel to it is still backing off from an earlier failed attempt
+        # (e.g. we gossiped to it as a seed before it was listening). Start
+        # with a fresh connection so the first requests do not fail fast.
+        fresh = [nid for e, nid in events if e in (Event.JOINED, Event.RECOVERED, Event.REJOINED)]
+        for node_id in fresh:
             address = self.membership.address_of(node_id)
             if address:
                 self.pool.reset(address)
-        if returned:
+        if any(e in (Event.RECOVERED, Event.REJOINED) for e, _ in events):
             self._wake_hints()
 
     def _sync_ring(self) -> None:

@@ -43,6 +43,9 @@ markers = [
     "e2e: launches real server processes via the CLI (slowest)",
 ]
 addopts = "-ra --strict-markers"
+log_level = "INFO"
+log_format = "%(asctime)s.%(msecs)03d %(levelname)s %(message)s"
+log_date_format = "%H:%M:%S"
 
 [tool.ruff]
 line-length = 110

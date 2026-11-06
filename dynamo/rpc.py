@@ -4,6 +4,12 @@ Opening a channel costs a TCP (and HTTP/2) handshake, so channels are cached
 per address and reused for every RPC. gRPC's default reconnect backoff grows
 to 120 s, which would hide a recovered node from its peers for minutes; the
 options below cap it so recovery is noticed within a couple of seconds.
+
+By default gRPC Python also shares connections ("subchannels") process-wide
+between channels with the same target and options, so a brand-new channel
+can inherit another channel's reconnect backoff and fail instantly with
+"connection refused" against a server that is up. A local subchannel pool
+makes every channel own its connections, which is what ``reset`` relies on.
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ import grpc
 from dynamo.proto import dynamo_pb2_grpc
 
 CHANNEL_OPTIONS: tuple[tuple[str, int], ...] = (
+    ("grpc.use_local_subchannel_pool", 1),
     ("grpc.initial_reconnect_backoff_ms", 100),
     ("grpc.min_reconnect_backoff_ms", 100),
     ("grpc.max_reconnect_backoff_ms", 1000),

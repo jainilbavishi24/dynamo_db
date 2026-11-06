@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import socket
 import time
 from collections.abc import Callable, Iterator
@@ -30,9 +31,20 @@ FAST = {
 
 
 def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("localhost", 0))
-        return s.getsockname()[1]
+    """A currently unused port *below* the kernel's ephemeral range.
+
+    Binding port 0 would return an ephemeral port, which any outgoing
+    connection may take as its source port before the server binds it.
+    """
+    for _ in range(200):
+        port = random.randint(20000, 32000)
+        with socket.socket() as s:
+            try:
+                s.bind(("localhost", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError("no free port found")
 
 
 def wait_until(predicate: Callable[[], bool], timeout: float = 10.0, message: str = "") -> None:
@@ -63,7 +75,16 @@ class Cluster:
                           data_dir=str(self.data_dir), **self.overrides)
 
     def start(self, node_id: str) -> DynamoNode:
-        server = NodeServer(self.config(node_id)).start()
+        for attempt in range(20):
+            try:
+                server = NodeServer(self.config(node_id)).start()
+                break
+            except OSError:
+                # Another process grabbed the port between selection and bind
+                # (or a just-stopped server is still releasing it).
+                if attempt == 19:
+                    raise
+                time.sleep(0.1)
         self.servers[node_id] = server
         return server.node
 
